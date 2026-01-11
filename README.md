@@ -34,3 +34,5 @@ url_shortener/
 ├── templates/
 │ ├── index.html
 │ └── result.html
+usage-
+http://127.0.0.1:5000
