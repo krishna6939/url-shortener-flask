@@ -2,31 +2,37 @@
 <html>
 <head>
     <title>URL Shortener</title>
+    <script>
+        function copyText() {
+            const text = document.getElementById("shortUrl").innerText;
+            navigator.clipboard.writeText(text);
+            alert("Short URL copied!");
+        }
+    </script>
 </head>
 <body>
-    <h1>Advanced URL Shortener</h1>
 
-    <form method="post">
-        <input type="url" name="url" placeholder="Enter URL" required><br><br>
-        <input type="text" name="custom_code" placeholder="Custom short code (optional)"><br><br>
-        <button type="submit">Shorten</button>
-    </form>
+<h2>URL Shortener</h2>
 
-    {% if error %}
-        <p style="color:red">{{ error }}</p>
-    {% endif %}
+<form method="POST">
+    <input type="url" name="url" placeholder="Enter long URL" required><br><br>
+    <input type="text" name="custom" placeholder="Custom short code (optional)"><br><br>
+    <input type="date" name="expiry"><br><br>
+    <button type="submit">Shorten</button>
+</form>
 
-    {% if short_url %}
-        <p>
-            Short URL:
-            <a href="{{ short_url }}">{{ short_url }}</a>
-            <button onclick="navigator.clipboard.writeText('{{ short_url }}')">
-                Copy
-            </button>
-        </p>
-    {% endif %}
+{% if message %}
+<p style="color:red;">{{ message }}</p>
+{% endif %}
 
-    <br>
-    <a href="/admin">Admin Dashboard</a>
+{% if short_url %}
+<hr>
+<p><b>Your Short URL:</b></p>
+<p id="shortUrl">
+    <a href="{{ short_url }}" target="_blank">{{ short_url }}</a>
+</p>
+<button onclick="copyText()">Copy</button>
+{% endif %}
+
 </body>
 </html>

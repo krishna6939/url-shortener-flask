@@ -1,134 +1,156 @@
-from flask import Flask, request, redirect, render_template, session, url_for
+from flask import Flask, render_template, request, redirect, session, url_for
 import sqlite3
-import string
-import random
+import string, random
+from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = "super-secret-key"
+app.secret_key = "secret-key-change-this"
+
+DB = "urls.db"
 
 # ---------- ADMIN CREDENTIALS ----------
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD_HASH = generate_password_hash("admin123")
+ADMIN_USER = "admin"
+ADMIN_PASS_HASH = generate_password_hash("admin123")
+
+# ---------- RESERVED ROUTES ----------
+RESERVED_ROUTES = ["admin", "login", "logout", "stats", "toggle"]
 
 # ---------- DATABASE ----------
+def get_db():
+    return sqlite3.connect(DB)
+
 def init_db():
-    conn = sqlite3.connect("urls.db")
-    cursor = conn.cursor()
-    cursor.execute("""
+    with get_db() as con:
+        con.execute("""
         CREATE TABLE IF NOT EXISTS urls (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            short_code TEXT UNIQUE NOT NULL,
-            original_url TEXT NOT NULL,
-            clicks INTEGER DEFAULT 0
+            short_code TEXT UNIQUE,
+            original_url TEXT,
+            clicks INTEGER DEFAULT 0,
+            expires_at TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT
         )
-    """)
-    conn.commit()
-    conn.close()
+        """)
 
 init_db()
 
-def get_db_connection():
-    return sqlite3.connect("urls.db")
-
 # ---------- HELPERS ----------
-def generate_short_code(length=6):
+def generate_code(length=6):
     chars = string.ascii_letters + string.digits
-    return ''.join(random.choices(chars, k=length))
+    return ''.join(random.choice(chars) for _ in range(length))
 
-def login_required():
-    return session.get("admin_logged_in")
+def is_expired(row):
+    if row[4]:
+        return datetime.now() > datetime.fromisoformat(row[4])
+    return False
 
 # ---------- ROUTES ----------
 @app.route("/", methods=["GET", "POST"])
-def home():
+def index():
     short_url = None
-    error = None
+    message = None
 
     if request.method == "POST":
-        original_url = request.form["url"]
-        custom_code = request.form.get("custom_code")
+        original = request.form["url"]
+        custom = request.form["custom"].strip()
+        expiry = request.form["expiry"]
 
-        short_code = custom_code if custom_code else generate_short_code()
+        code = custom if custom else generate_code()
 
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO urls (short_code, original_url) VALUES (?, ?)",
-                (short_code, original_url)
-            )
-            conn.commit()
-            conn.close()
+        if code in RESERVED_ROUTES:
+            message = "This short code is reserved. Choose another."
+        else:
+            with get_db() as con:
+                try:
+                    con.execute(
+                        "INSERT INTO urls (short_code, original_url, expires_at, created_at) VALUES (?, ?, ?, ?)",
+                        (code, original, expiry or None, datetime.now().isoformat())
+                    )
+                    short_url = request.host_url + code
+                except sqlite3.IntegrityError:
+                    message = "Short code already exists. Try another."
 
-            short_url = request.host_url + short_code
+    return render_template("index.html", short_url=short_url, message=message)
 
-        except sqlite3.IntegrityError:
-            error = "Short code already exists. Try another."
+@app.route("/<code>")
+def redirect_url(code):
+    if code in RESERVED_ROUTES:
+        return redirect(url_for(code))
 
-    return render_template("index.html", short_url=short_url, error=error)
+    with get_db() as con:
+        row = con.execute(
+            "SELECT * FROM urls WHERE short_code=? AND is_active=1",
+            (code,)
+        ).fetchone()
 
-@app.route("/<short_code>")
-def redirect_url(short_code):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+        if not row or is_expired(row):
+            return render_template("expired.html")
 
-    cursor.execute(
-        "SELECT original_url FROM urls WHERE short_code = ?",
-        (short_code,)
-    )
-    row = cursor.fetchone()
-
-    if row:
-        cursor.execute(
-            "UPDATE urls SET clicks = clicks + 1 WHERE short_code = ?",
-            (short_code,)
+        con.execute(
+            "UPDATE urls SET clicks = clicks + 1 WHERE short_code=?",
+            (code,)
         )
-        conn.commit()
-        conn.close()
-        return redirect(row[0])
 
-    conn.close()
-    return "URL not found", 404
+        return redirect(row[2])
 
-# ---------- LOGIN ----------
+@app.route("/stats/<code>")
+def stats(code):
+    with get_db() as con:
+        row = con.execute(
+            "SELECT * FROM urls WHERE short_code=?",
+            (code,)
+        ).fetchone()
+
+    if not row:
+        return render_template("expired.html")
+
+    return render_template("stats.html", row=row)
+
+# ---------- ADMIN ----------
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
-
     if request.method == "POST":
-        username = request.form["username"]
-        password = request.form["password"]
+        user = request.form["username"]
+        pwd = request.form["password"]
 
-        if username == ADMIN_USERNAME and check_password_hash(
-            ADMIN_PASSWORD_HASH, password
-        ):
-            session["admin_logged_in"] = True
-            return redirect(url_for("admin"))
+        if user == ADMIN_USER and check_password_hash(ADMIN_PASS_HASH, pwd):
+            session["admin"] = True
+            return redirect("/admin")
         else:
-            error = "Invalid credentials"
+            error = "Invalid username or password"
 
     return render_template("login.html", error=error)
+
+@app.route("/admin")
+def admin():
+    if not session.get("admin"):
+        return redirect("/login")
+
+    with get_db() as con:
+        data = con.execute("SELECT * FROM urls").fetchall()
+
+    return render_template("admin.html", data=data)
+
+@app.route("/toggle/<code>")
+def toggle(code):
+    if not session.get("admin"):
+        return redirect("/login")
+
+    with get_db() as con:
+        con.execute(
+            "UPDATE urls SET is_active = NOT is_active WHERE short_code=?",
+            (code,)
+        )
+
+    return redirect("/admin")
 
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for("login"))
+    return redirect("/login")
 
-# ---------- ADMIN ----------
-@app.route("/admin")
-def admin():
-    if not login_required():
-        return redirect(url_for("login"))
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT short_code, original_url, clicks FROM urls")
-    urls = cursor.fetchall()
-    conn.close()
-
-    return render_template("admin.html", urls=urls)
-
-# ---------- RUN ----------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(debug=True)

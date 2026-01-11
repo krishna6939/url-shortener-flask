@@ -4,27 +4,30 @@
     <title>Admin Dashboard</title>
 </head>
 <body>
-    <h1>Admin Dashboard</h1>
 
-    <table border="1" cellpadding="8">
-        <tr>
-            <th>Short Code</th>
-            <th>Original URL</th>
-            <th>Clicks</th>
-        </tr>
+<h2>Admin Dashboard</h2>
+<a href="/logout">Logout</a>
 
-        {% for url in urls %}
-        <tr>
-            <td>{{ url[0] }}</td>
-            <td>{{ url[1] }}</td>
-            <td>{{ url[2] }}</td>
-        </tr>
-        {% endfor %}
-    </table>
+<table border="1" cellpadding="5">
+<tr>
+    <th>Short Code</th>
+    <th>Original URL</th>
+    <th>Clicks</th>
+    <th>Status</th>
+    <th>Action</th>
+</tr>
 
-    <br>
-    <a href="/">Back to Home</a>
-    <br><br>
-    <a href="/logout">Logout</a>
+{% for r in data %}
+<tr>
+    <td>{{ r[1] }}</td>
+    <td>{{ r[2] }}</td>
+    <td>{{ r[3] }}</td>
+    <td>{{ "Active" if r[5] else "Disabled" }}</td>
+    <td><a href="/toggle/{{ r[1] }}">Toggle</a></td>
+</tr>
+{% endfor %}
+
+</table>
+
 </body>
 </html>
